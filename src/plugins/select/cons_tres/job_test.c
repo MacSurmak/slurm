@@ -3123,6 +3123,9 @@ static int _run_now(job_record_t *job_ptr, bitstr_t *node_bitmap,
 			if (!bit_test(node_bitmap, i))
 				continue;
 
+			if (job_ptr->details->req_node_bitmap && !bit_test(job_ptr->details->req_node_bitmap, i))
+				continue;
+
 			node_record_t *nr = node_record_table_ptr[i];
 			bool has_capacity = false;
 
