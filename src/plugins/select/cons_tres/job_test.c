@@ -3114,6 +3114,61 @@ static int _run_now(job_record_t *job_ptr, bitstr_t *node_bitmap,
 
 	hres_pre_select(job_ptr, false);
 
+	/* >>> FORK FEATURE: SchedulerParameters=preempt_by_weight >>> */
+	if (slurm_conf.sched_params &&
+	    xstrcasestr(slurm_conf.sched_params, "preempt_by_weight")) {
+		uint32_t min_eligible_weight = INFINITE;
+
+		for (int i = 0; i < node_record_count; i++) {
+			if (!bit_test(node_bitmap, i))
+				continue;
+
+			node_record_t *nr = node_record_table_ptr[i];
+			bool has_capacity = false;
+
+			/* 1. If node is COMPLETING */
+			if (IS_NODE_COMPLETING(nr)) {
+				has_capacity = true;
+			}
+
+			/* 2. If node is running preemptable background tasks */
+			if (!has_capacity && preemptee_candidates) {
+				job_record_t *pj;
+				list_itr_t *it = list_iterator_create(preemptee_candidates);
+				while ((pj = list_next(it))) {
+					if (pj->node_bitmap && bit_test(pj->node_bitmap, i)) {
+						has_capacity = true;
+						break;
+					}
+				}
+				list_iterator_destroy(it);
+			}
+
+			/* 3. If node is IDLE or MIXED */
+			if (!has_capacity && (IS_NODE_IDLE(nr) || IS_NODE_MIXED(nr))) {
+				has_capacity = true;
+			}
+
+			/* Remember minimal weight of the best node */
+			if (has_capacity && (nr->weight < min_eligible_weight)) {
+				min_eligible_weight = nr->weight;
+			}
+		}
+
+		/* Exclude from node_bitmap all nodes that are worse than the best available */
+		if (min_eligible_weight != INFINITE) {
+			for (int i = 0; i < node_record_count; i++) {
+				if (!bit_test(node_bitmap, i))
+					continue;
+				node_record_t *nr = node_record_table_ptr[i];
+				if (nr->weight > min_eligible_weight) {
+					bit_clear(node_bitmap, i);
+				}
+			}
+		}
+	}
+	/* <<< END FORK FEATURE <<< */
+
 	save_node_map = bit_copy(node_bitmap);
 top:	orig_node_map = bit_copy(save_node_map);
 
